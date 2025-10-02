@@ -11,9 +11,8 @@
 #include <pwd.h>
 #include <unistd.h>
 #include <sys/sysmacros.h>
-#include "forms.h"
 
-FL_OBJECT *cnt, *bReset, *bSave, *bExit;
+
 uint8_t curTemp = 0x4f;
 uint8_t prevTemp = 0;
 
@@ -79,7 +78,8 @@ int getUserGroupId(int *uid, int *gid)
 						if(strncmp((line + n), ":x:", 3) == 0)
 						{
 							*uid = atoi((line + n + 3));
-							printf("uid: %d\n", *uid);
+							if(!debug)
+								printf("uid: %d\n", *uid);
 							n += 3;
 						}
 					}
@@ -88,7 +88,8 @@ int getUserGroupId(int *uid, int *gid)
 						if(*(line + n) == ':')
 						{
 							*gid = atoi((line + n + 1));
-							printf("gid: %d\n", *gid);
+							if(!debug)
+								printf("gid: %d\n", *gid);
 							fclose(f);
 							return 0;
 						}
@@ -121,12 +122,14 @@ int initSettings()
 	pwd = getpwuid(getuid());
 	homeDir = pwd->pw_dir;
 		
-	printf("Home directory is %s\n", homeDir);
+	if(!debug)
+		printf("Home directory is %s\n", homeDir);
 		
 	tmp_buffer = malloc(strlen(homeDir) + 10);
 	sprintf(tmp_buffer, "%s/.config", homeDir);
 	
-	printf("Config directory is %s\n", tmp_buffer);
+	if(!debug)
+		printf("Config directory is %s\n", tmp_buffer);
 	
 	DIR *dir = opendir(tmp_buffer);
 	if(dir == NULL)
@@ -186,7 +189,8 @@ int saveConfig(uint8_t temperature)
 		return -1;
 	}
 	
-	printf("Selected threshold temperature saved in %s\n", configFile);
+	if(!debug)
+		printf("Selected threshold temperature saved in %s\n", configFile);
 	
 	fclose(f);
 	
@@ -216,39 +220,22 @@ int loadConfig()
 		return -1;
 	}
 	
-	printf("ret value: %d\n", ret);
+	if(!debug)
+		printf("ret value: %d\n", ret);
 	
 	if(ret >= 45 && ret <= 85)
 		curTemp = ret;
 	else
 		printf("Configuration file contain a invalid value\n");
 	
-	printf("Threshold temperature loaded from configuration file\n");
+	if(!debug)
+		printf("Threshold temperature loaded from configuration file\n");
 	
 	fclose(f);
 	
 	return 0;
 }
 
-void showError(const char *title, const char *str)
-{
-	FL_FORM *f;
-	FL_OBJECT *obj;
-	
-	f = fl_bgn_form(FL_UP_BOX, 300, 130);
-	fl_add_box(FL_NO_BOX, 0, 0, 300, 90, str);
-	obj = fl_add_button(FL_NORMAL_BUTTON, 115, 90, 70, 25, "OK");
-	
-	fl_end_form();
-	
-	fl_show_form(f, FL_PLACE_MOUSE, FL_FULLBORDER, title);
-	
-	while(fl_do_forms() != obj)
-	
-	fl_finish();
-	exit(-1);
-}
-	
 
 int set_temp_threshold(uint8_t temperature)
 {
@@ -285,7 +272,8 @@ int set_temp_threshold(uint8_t temperature)
 	ret = ioctl(fd, ICC_IOCTL_CMD, &arg);
 	usleep(1000);
 	
-	printf("ioctl ret: %d", ret);
+	if (!debug)
+		printf("ioctl ret: %d", ret);
 	
 	switch(ret)
 	{
@@ -314,7 +302,8 @@ int set_temp_threshold(uint8_t temperature)
 	switch(*arg.reply)
 	{
 		case 0x00:
-			printf("\nSuccess!\n");
+			if(!debug)
+				printf("\nSuccess!\n");
 			break;
 		case 0x02:
 			printf("\nError: Invalid data\n");
@@ -329,13 +318,13 @@ int set_temp_threshold(uint8_t temperature)
 	return 0;
 }
 
-int get_temp_threshold()
+int get_temp_threshold(uint8_t* temp)
 {
 	int fd = -1;
 	int ret = 0;
 	struct icc_cmd arg;
 	
-	curTemp = 0x4f;
+	*temp = 0x4f;
 
 	fd = open("/dev/icc", 0);
 	if(fd == -1)
@@ -354,7 +343,8 @@ int get_temp_threshold()
 	ret = ioctl(fd, ICC_IOCTL_CMD, &arg);
 	usleep(1000);
 	
-	printf("ioctl ret: %d", ret);
+	if(!debug)
+		printf("ioctl ret: %d", ret);
 	
 	switch(ret)
 	{
@@ -383,7 +373,8 @@ int get_temp_threshold()
 	switch(*arg.reply)
 	{
 		case 0x00:
-			printf("\nSuccess!\n");
+			if(!debug)
+				printf("\nSuccess!\n");
 			break;
 		case 0x02:
 			printf("\nError: Invalid data\n");
@@ -396,108 +387,53 @@ int get_temp_threshold()
 			return *arg.reply;
 	}
 	
-	if(*(arg.reply + 5) >= 45 && *(arg.reply + 5) <= 85)
-		curTemp = *(arg.reply + 5);
-	else
-	{
-		printf("Current threshold temperature (%u°C) is out of range, back to default (79°C)\n", *(arg.reply + 5));
-		set_temp_threshold(curTemp);
-	}
+	*temp = *(arg.reply + 5);
 		
 	return 0;
 }
 
-void counter_callback(FL_OBJECT *obj, long id)
-{
-	int ret;
-	
-	if(prevTemp == 0 && file_exist(configFile) != -1)
-		prevTemp = curTemp;
-		
-	curTemp = 0x4f;
-	
-	curTemp = (uint8_t)fl_get_counter_value(obj);
-	printf("Threshold temperature set to %d \n", curTemp);
-	
-	ret = set_temp_threshold(curTemp);
-	if(ret)
-		exit(ret);
-	
-	if(prevTemp != curTemp)
-		fl_set_button(bSave, 0);
-	else
-		fl_set_button(bSave, 1);
-		
-}
-
-void save_callback(FL_OBJECT *obj, long id)
-{
-	if(prevTemp == curTemp)
-	{
-		fl_set_button(obj, 1);
-	}
-	else if(prevTemp != 0)
-	{
-		saveConfig(curTemp);
-		prevTemp = curTemp;
-	}
-	
-	if(file_exist(configFile))
-	{
-		saveConfig(curTemp);
-		fl_set_button(obj, 1);
-	}
-	
-	if(prevTemp == 0)
-	{
-		prevTemp = curTemp;
-		
-		if(file_exist(configFile) != -1)
-			fl_set_button(obj, 1);
-	}
-}
-
-void reset_callback(FL_OBJECT *obj, long id)
-{
-	prevTemp = 0;
-	curTemp = 0x4f;
-	fl_set_counter_value(cnt, curTemp);
-	fl_set_button(bSave, 0);
-	
-	set_temp_threshold(curTemp);
-	
-	printf("Threshold temperature back to default\n");
-	
-	unlink(configFile);
-}
-
-/*const char *counterString(FL_OBJECT *obj, double value, int prec) 
-{
-    static char buf[32];
-
-     sprintf(buf, "°C %u", (uint8_t)value);
-     return buf;
-}*/
-
 
 int main(int argc, char *argv[])
 {
-	int no_gui = -1;
+	int nextTemp = 70;
 	int ret = -1;
+	int res = -1;
 	int gid;
 	int uid;
 	dev_t dev;
+
+	if(argc < 2)
+	{
+		printf("You have to provide temperature argument! (See --help) \n");
+		return -1;
+	}
 	
 	for(int i = 1; i < argc; i++)
 	{
-		if(strcmp(argv[i], "--debug") == 0)
+		if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
+		{
+			printf("Usage: ps4fancontrol temp ");
+			printf("[-h | --help] [-d | --debug] [-r | --reset]\n"); 
+			return 0;
+		}
+		else if(strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--debug") == 0)
+		{
 			debug = 0;
-		else if(strcmp(argv[i], "--no-gui") == 0)
-			no_gui = 0;
+		}
+		else if(strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--reset") == 0)
+		{
+			res = 0;
+		}
+		else 
+		{
+			if(argv[i][0] == '-')
+			{
+				printf("Invalid argument at %d given: %s\n", i, argv[i]);
+				return -1;
+			}
+			nextTemp = atoi(argv[i]);
+		}
 	}
-	
-	if(no_gui)
-		fl_initialize(&argc, argv, 0, 0, 0);
 		
 	dev = makedev(0x49, 1);
 	mknod("/dev/icc", S_IFCHR | 0666, dev);
@@ -505,11 +441,7 @@ int main(int argc, char *argv[])
 	int fd = open("/dev/icc", 0);
 	if(fd == -1)
 	{
-		if(no_gui)
-			showError("Error", "You need run the program as root!");
-		else
-			printf("Error: you need run the program as root!");
-			
+		printf("Error: you need run the program as root!");		
 		return -1;
 	}
 	close(fd);
@@ -530,48 +462,29 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 	
-	get_temp_threshold(&curTemp);
-	
 	initSettings();
 	ret = loadConfig();
-	
-	if(no_gui == 0)
+
+	get_temp_threshold(&prevTemp);
+	curTemp = nextTemp;
+
+	if (prevTemp == curTemp)
 	{
-		if(set_temp_threshold(curTemp))
-			return -1;
-		else
-			return 0;
+		printf("Threshold temperature already at: %d\n", curTemp);
+		return 0;
 	}
 	
-	//GUI
-	FL_FORM *form;
+	printf("Threshold temperature set %d --> %d\n", prevTemp, curTemp);
 
-    form = fl_bgn_form(FL_UP_BOX, 350, 150);
-    
-	cnt = fl_add_counter(FL_NORMAL_COUNTER, 25, 50, 300, 25, "Celsius Temperature");
-	fl_set_counter_bounds(cnt, 45, 85);
-	fl_set_counter_step(cnt, 1, 10);
-	fl_set_counter_precision(cnt, 0);
-	fl_set_object_callback(cnt, counter_callback, ret);
-	fl_set_counter_value(cnt, curTemp);
-	fl_set_object_return(cnt, FL_RETURN_END_CHANGED);
-	
-	bReset = fl_add_button(FL_NORMAL_BUTTON, 17, 115, 102, 25, "Reset");
-	bSave = fl_add_button(FL_BUTTON, 124, 115, 102, 25, "Save");
-	bExit = fl_add_button(FL_NORMAL_BUTTON, 231, 115, 102, 25, "Exit");
-	
-	fl_set_object_callback(bSave, save_callback, ret);
-	if(ret != -1)
-		fl_set_button(bSave, 1);
-		
-	fl_set_object_callback(bReset, reset_callback, 0);
+	if (ret != -1 && !file_exist(configFile)) 
+	{
+		saveConfig(curTemp);
+	}
 
-    fl_end_form();
- 
-    fl_show_form(form, FL_PLACE_MOUSE, FL_FULLBORDER, "PS4 Fan Control");
+	if(set_temp_threshold(curTemp))
+		return -1;
+	else
+		return 0;
 
-    while(fl_do_forms() != bExit){}
-	
-	fl_finish();
 	return 0;
 }
